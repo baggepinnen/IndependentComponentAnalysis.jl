@@ -1,0 +1,13 @@
+name = "IndependentComponentAnalysis"
+uuid = "a506da57-2f56-4b21-828f-08a84784c93c"
+authors = ["Fredrik Bagge Carlson"]
+version = "0.1.0"
+
+[compat]
+julia = "1"
+
+[extras]
+Test = "8dfed614-e22c-5e08-85e1-65c5234f0b40"
+
+[targets]
+test = ["Test"]
