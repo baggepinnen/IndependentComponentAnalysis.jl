@@ -12,13 +12,17 @@ This package also modifies the interface to the algorithm slightly, use it like 
 using IndependentComponentAnalysis
 X = randn(4,100)
 k = 2 # Number of components to extract
-fit(ICA, X, k, alg = FastICA();
+ica = fit(ICA, X, k,  alg = FastICA();
                 fun       = Tanh(),
                 do_whiten = true,
                 maxiter   = 100,
                 tol       = 1e-6,
                 mean      = nothing,
-                winit     = nothing)
+                winit     = nothing
+      )
+
+Xt = transform(ica, X)
 ```
 
 - The options for `fun` are `Tanh(a::Real)` and `Gaus()`
+- If you have also loaded MultivariateStats, a conflict will arise, cauing you to have to qualify `fun` like this: `IndependentComponentAnalysis.Tanh` etc. If [this PR](https://github.com/JuliaStats/MultivariateStats.jl/pull/122) is merged, this package will work better together with MultivariateStats.

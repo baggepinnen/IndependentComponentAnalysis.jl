@@ -3,9 +3,9 @@ module IndependentComponentAnalysis
 using Statistics, LinearAlgebra
 
 using LoopVectorization
-using LoopVectorization.SLEEFPirates
+using SLEEFPirates
 import MultivariateStats
-using MultivariateStats: _invsqrtm!, fullmean, ICA, preprocess_mean, centralize, extract_kv, fit, indim, outdim, transform, mean
+using MultivariateStats: _invsqrtm!, fullmean, ICA, preprocess_mean, centralize, extract_kv, fit, indim, outdim, transform, mean, ConvergenceException
 
 
 
@@ -38,8 +38,8 @@ function update_UE!(f::Tanh{T}, U::AbstractMatrix{T}, E1::AbstractVector{T}) whe
     _s = zero(T)
     a = f.a
     @inbounds for j = 1:k
-        @avx for i = 1:n # Adding @avx here makes this function about 2.3 times faster on modern CPUs
-            t = tanh(a * U[i,j])
+        @avx for i = 1:n
+            t = SLEEFPirates.tanh(a * U[i,j])
             U[i,j] = t
             _s += a * (1 - t^2)
         end

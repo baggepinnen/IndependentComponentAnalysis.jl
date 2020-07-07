@@ -9,9 +9,7 @@ jobs:
     strategy:
       matrix:
         version:
-          - '1.0'
-          - '1.5'
-          - 'nightly'
+          - '1.4'
         os:
           - ubuntu-latest
         arch:
