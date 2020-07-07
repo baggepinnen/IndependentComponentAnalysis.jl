@@ -4,7 +4,7 @@
 [![Coverage](https://codecov.io/gh/baggepinnen/IndependentComponentAnalysis.jl/branch/master/graph/badge.svg)](https://codecov.io/gh/baggepinnen/IndependentComponentAnalysis.jl)
 
 
-This package modifies the implementation of the FastICA algorithm from [MultivariateStats.jl](https://github.com/JuliaStats/MultivariateStats.jl) to make it more than 5x faster. This comes at the expense of taking an additional dependency, on [LoopVectorization.jl](https://github.com/chriselrod/LoopVectorization.jl).
+This package modifies the implementation of the FastICA algorithm from [MultivariateStats.jl](https://github.com/JuliaStats/MultivariateStats.jl) to make it more than 5x faster. This comes at the expense of taking an additional dependency, on [LoopVectorization.jl](https://github.com/chriselrod/LoopVectorization.jl) and some additional compilation time.
 
 This package also modifies the interface to the algorithm slightly, use it like this:
 

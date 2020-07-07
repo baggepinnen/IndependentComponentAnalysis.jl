@@ -38,8 +38,8 @@ function update_UE!(f::Tanh{T}, U::AbstractMatrix{T}, E1::AbstractVector{T}) whe
     _s = zero(T)
     a = f.a
     @inbounds for j = 1:k
-        @avx for i = 1:n
-            t = SLEEFPirates.tanh(a * U[i,j])
+        @simd for i = 1:n
+            t = SLEEFPirates.tanh_fast(a * U[i,j])
             U[i,j] = t
             _s += a * (1 - t^2)
         end
@@ -75,8 +75,8 @@ end
 #   Independent Component Analysis: Algorithms and Applications.
 #   Neural Network 13(4-5), 2000.
 #
-function ica!(::FastICA, W::DenseMatrix{T},      # initialized component matrix, size (m, k)
-                  X::DenseMatrix{T},      # (whitened) observation sample matrix, size(m, n)
+function ica!(::FastICA, W::AbstractMatrix{T},      # initialized component matrix, size (m, k)
+                  X::AbstractMatrix{T},      # (whitened) observation sample matrix, size(m, n)
                   fun::ICAGDeriv,         # approximate neg-entropy functor
                   maxiter::Int,           # maximum number of iterations
                   tol::Real) where T<:Real# convergence tolerance
@@ -174,7 +174,7 @@ function MultivariateStats.fit(::Type{ICA}, X::AbstractMatrix{T},        # sampl
     end
 
     # initialize
-    W = (winit === nothing ? randn(T, size(Z,1), k) : winit)
+    W = winit === nothing ? randn(T, size(Z,1), k) : copy(winit)
 
     # invoke core algorithm
     ica!(alg, W, Z, fun, maxiter, tol)
