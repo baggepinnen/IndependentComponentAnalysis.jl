@@ -9,7 +9,7 @@ using MultivariateStats: _invsqrtm!, fullmean, ICA, preprocess_mean, centralize,
 
 
 
-export fit, Tanh, Gaus, ica!, ICA, indim, outdim, transform, mean
+export fit, Tanh, Gaus, ica!, ICA, FastICA, indim, outdim, transform, mean
 
 
 # Independent Component Analysis
