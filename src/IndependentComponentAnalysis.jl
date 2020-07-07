@@ -136,7 +136,7 @@ function ica!(::FastICA, W::DenseMatrix{T},      # initialized component matrix,
 
         @debug "Iteration $t" change=chg tolerance=tol
     end
-    converged || @error("Did not converge" maxiter, chg, oftype(chg, tol))
+    converged || @error("Did not converge", maxiter, chg, oftype(chg, tol))
     return W
 end
 
