@@ -9,8 +9,11 @@ import StatsBase
 
 @testset "IndependentComponentAnalysis.jl" begin
 
-
-
+    @testset "duet" begin
+        @info "Testing duet"
+        include("test_duet.jl")
+    end
+    
 
     @testset "ICA" begin
 

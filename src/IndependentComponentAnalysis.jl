@@ -188,4 +188,7 @@ end
 
 
 
+export duet, istft
+include("duet.jl")
+
 end
