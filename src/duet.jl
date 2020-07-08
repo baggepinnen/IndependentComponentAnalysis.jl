@@ -154,7 +154,7 @@ function duet(
     α = abs.(R21) # relative attenuation
     α = @. α - 1 / α
 
-    δ = @. -imag(log(R21)) / fmat # 'δ ' relative delay
+    δ = @. -angle(R21) / fmat # 'δ ' relative delay
 
 
     Sweight = @. (abs(S1) * abs(S2))^p * abs(fmat)^q # weights

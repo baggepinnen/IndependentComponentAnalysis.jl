@@ -33,7 +33,7 @@ Xt = transform(ica, X)
 
 ## DUET
 
-[DUET](https://www.researchgate.net/publication/227143748_The_DUET_blind_source_separation_algorithm) is an algorithm for blind source separation. It works on stereo mixtures and can separate any number of sources as long as they do not overlap in the time-frequency domain. The interface looks like this:
+[DUET](https://www.researchgate.net/publication/227143748_The_DUET_blind_source_separation_algorithm) (Degenerate Unmixing Estimation Technique) is an algorithm for blind source separation. It works on stereo mixtures and can separate any number of sources as long as they do not overlap in the time-frequency domain. The interface looks like this:
 
 
 ```julia
