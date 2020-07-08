@@ -38,20 +38,24 @@ Xt = transform(ica, X)
 
 ```julia
 est, H = duet( x1, x2, n_sources, n = 1024;
-                    p           = 1, # amplitude power used to weight histogram
-                    q           = 0, # delay power used to weight histogram
-                    amax        = 0.7,
-                    dmax        = 3.6,
-                    abins       = 35,
-                    dbins       = 50,
-                    kernel_size = 1, # Controls the smoothing of the histogram.
-                    window      = hanning,
+                    p            = 1, # amplitude power used to weight histogram
+                    q            = 0, # delay power used to weight histogram
+                    amax         = 0.7,
+                    dmax         = 3.6,
+                    abins        = 35,
+                    dbins        = 50,
+                    kernel_size  = 1, # Controls the smoothing of the histogram.
+                    bigdelay     = false,
+                    kernel_sizeδ = 1,
+                    window       = hanning,
                     kwargs..., # These are sent to the stft function
 )
 ```
 
 The returned values are `est::Matrix(time, n_sources)` and `H::DUET`.
 `H` can be plotted `plot(H)`, which shows the delay/amplitude histogram and the identified peaks. This can be used to tweak the input parameters.
+
+- `bigdelay` indicates whether or not the two microphones are far apart. If `true`, the delay `δ` is estimated using the differential method (see the paper sec 8.4.1) and the delay map is smoothed using `kernel_sizeδ`.
 
 #### Example:
 ```julia

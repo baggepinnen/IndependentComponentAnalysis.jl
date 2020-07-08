@@ -57,7 +57,7 @@ function separate(x1::AbstractArray{T},x2,αpeak::Vector{<:Real}, δpeak::Vector
     αpeak = @. (αpeak + sqrt(αpeak^2 + 4)) / 2
 
     bestsofar = fill(T(Inf), size(S1))
-    bestind = zeros(T, size(S1))
+    bestind = zeros(Int, size(S1))
     for i = 1:numsources
         score = @. abs(αpeak[i] * cis(-fmat * δpeak[i]) * S1 - S2)^2 /
            (1 + αpeak[i]^2)
@@ -119,6 +119,17 @@ end
 
 DUET is an algorithm for blind source separation. It works on stereo mixtures and can separate any number of sources as long as they do not overlap in the time-frequency domain.
 
+## `p` and `q`
+- `p = 0, q = 0`: the counting histogram proposed in the original DUET algorithm
+- `p = 1, q = 0`: motivated by the ML symmetric attenuation estimator
+- `p = 1, q = 2`: motivated by the ML delay estimator
+- `p = 2, q = 0`: in order to reduce delay estimator bias
+- `p = 2, q = 2`: for low signal-to-noise ratio or speech mixtures
+From the paper referenced below:
+"`p = 1, q = 0` is a good default choice. When the sources are not
+equal power, we would suggest `p = 0.5, q = 0` as it prevents the dominant
+source from hiding the smaller source peaks in the histogram."
+
 Implementation based on *Rickard, Scott. (2007). The DUET blind source separation algorithm. 10.1007/978-1-4020-6479-1_8.*
 """
 function duet(
@@ -135,6 +146,8 @@ function duet(
     kernel_size = 1,
     window = hanning,
     onesided = true,
+    bigdelay = false,
+    kernel_sizeδ = 1,
     kwargs...,
 )
 
@@ -152,9 +165,18 @@ function duet(
 
     R21 = (S2 .+ eps()) ./ (S1 .+ eps()) # ratio of spectrograms
     α = abs.(R21) # relative attenuation
-    α = @. α - 1 / α
+    α = @. α - 1 / α # symmetric attenuation
 
-    δ = @. -angle(R21) / fmat # 'δ ' relative delay
+    if bigdelay
+        Δω = 2pi / n
+        δ = @. angle(R21 * conj(S2)/(S1 + eps()) / abs2.(R21)) / Δω
+        if kernel_size > 0
+            K = KernelFactors.gaussian(kernel_sizeδ)
+            δ = imfilter(δ, kernelfactors((K,K)))
+        end
+    else
+        δ = @. -angle(R21) / fmat # 'δ ' relative delay
+    end
 
 
     Sweight = @. (abs(S1) * abs(S2))^p * abs(fmat)^q # weights
@@ -168,9 +190,11 @@ function duet(
     δind = @. round(Int, 1 + (dbins - 1) * (δ_vec + dmax) / (2dmax))
     # FULL-SPARSE TRICK TO CREATE 2D WEIGHTED HISTOGRAM
     A = Matrix(sparse(αind, δind, Sweight, abins, dbins))
-    K = KernelFactors.gaussian(kernel_size)
-    A = imfilter(A, kernelfactors((K,K)))
-    abins, dbins = size(A)
+    if kernel_size > 0
+        K = KernelFactors.gaussian(kernel_size)
+        A = imfilter(A, kernelfactors((K,K)))
+    end
+    # abins, dbins = size(A)
     ar,dr = LinRange(-amax , amax , abins ), LinRange(-dmax , dmax , dbins )
     inds = find_extrema(A, n_sources)
     av = [ar[i[1]] for i in inds]
