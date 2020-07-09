@@ -2,12 +2,12 @@ using DSP, ImageFiltering, Images, SparseArrays, FFTW, RecipesBase
 
 import DSP.Periodograms: compute_window
 
-function istft(S::AbstractMatrix{Complex{T}}, wlen::Int, overlap::Int; onesided, nfft=nextfastfft(wlen), window=hanning) where T
+function istft(S::AbstractMatrix{Complex{T}}, wlen::Int, overlap::Int=wlen÷2; onesided=true, nfft=nextfastfft(wlen), window=hanning) where T
     winc = wlen-overlap
     win, norm2 = compute_window(window, wlen)
     win² = win.^2
     nframes = size(S,2)-1
-    outlen = nfft + nframes*winc
+    outlen = wlen + nframes*winc
     out = zeros(T, outlen)
     tmp1 = Array{eltype(S)}(undef, size(S, 1))
 
@@ -25,14 +25,14 @@ function istft(S::AbstractMatrix{Complex{T}}, wlen::Int, overlap::Int; onesided,
         # tmp2 ./= AbstractFFTs.normalization(tmp2, size(tmp2)) # QUESTION: Not sure how to make this work
 
         ix = (k-1)*winc
-        @inbounds for n=1:nfft
+        @inbounds for n=1:wlen
             out[ix+n] += real(tmp2[n])*win[n]
             wsum[ix+n] += win²[n]
         end
 
     end
     mw = median(wsum)
-    @inbounds for i = 1:length(wsum)
+    @inbounds for i = eachindex(wsum,out)
         if wsum[i] >= 1e-3*mw
             out[i] /= wsum[i]
         end

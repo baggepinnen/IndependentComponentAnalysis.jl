@@ -1,3 +1,28 @@
+@testset "istft" begin
+    @info "Testing istft"
+
+    n = 128
+    nfft = 256
+    x = randn(1024)
+
+    window = DSP.hamming
+    S = stft(x, n; window)
+    xi = istft(S, n; window)
+    @test sum(abs, x-xi) < sqrt(eps())
+
+    window = DSP.hamming
+    S = stft(x, n; window, nfft)
+    xi = istft(S, n; window, nfft)
+    @test sum(abs, x-xi) < sqrt(eps())
+
+    window = DSP.rect
+    S = stft(x, n; window, nfft)
+    xi = istft(S, n; window, nfft)
+    @test sum(abs, x-xi) < sqrt(eps())
+
+end
+
+
 using Plots
 ##
 t = 0:0.1:2000
