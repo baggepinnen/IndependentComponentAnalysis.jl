@@ -2,36 +2,36 @@ using DSP
 @testset "istft" begin
     @info "Testing istft"
 
-    n = 128
+    n    = 128
     nfft = 256
-    x = randn(1024)
+    x    = randn(1024)
 
     window = DSP.hamming
-    S = stft(x, n; window)
-    xi = istft(S, n; window)
-    @test sum(abs, x-xi) < sqrt(eps())
+    S      = stft(x, n; window = window)
+    xi     = istft(S, n; window = window)
+    @test sum(abs, x - xi) < sqrt(eps())
 
     window = DSP.hamming
-    S = stft(x, n; window, nfft)
-    xi = istft(S, n; window, nfft)
-    @test sum(abs, x-xi) < sqrt(eps())
+    S      = stft(x, n; window = window, nfft = nfft)
+    xi     = istft(S, n; window = window, nfft = nfft)
+    @test sum(abs, x - xi) < sqrt(eps())
 
     window = DSP.rect
-    S = stft(x, n; window, nfft)
-    xi = istft(S, n; window, nfft)
-    @test sum(abs, x-xi) < sqrt(eps())
+    S      = stft(x, n; window = window, nfft = nfft)
+    xi     = istft(S, n; window = window, nfft = nfft)
+    @test sum(abs, x - xi) < sqrt(eps())
 
 end
 
 
 using Plots
 ##
-t = 0:0.1:2000
-# f = LinRange(0.9, 1.2, length(t))
-x1 = sin.(t)
-x2 = @. 1.3 * sign(sin(2t + 0.2) ) + 0.001 * randn()
-W = [0.3 0.7; 0.6 0.4]
-R = W * [x1 x2]'
+t      = 0:0.1:2000
+# f    = LinRange(0.9, 1.2, length(t))
+x1     = sin.(t)
+x2     = @. 1.3 * sign(sin(2t + 0.2) ) + 0.001 * randn()
+W      = [0.3 0.7; 0.6 0.4]
+R      = W * [x1 x2]'
 r1, r2 = R[1, :], R[2, :]
 
 ##
@@ -40,13 +40,13 @@ est, H = duet(
     r2,
     2,
     1024,
-    abins = 30,
-    dbins = 51,
-    dmax = 3.5,
-    amax = 2.8,
+    abins       = 30,
+    dbins       = 51,
+    dmax        = 3.5,
+    amax        = 2.8,
     kernel_size = 1,
-    q = 0,
-    onesided = true,
+    q           = 0,
+    onesided    = true,
 )
 if isinteractive()
     plotinds = 10000:10200
