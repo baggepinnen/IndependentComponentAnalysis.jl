@@ -188,7 +188,7 @@ end
 
 
 
-export duet, istft
+export duet, istft, mixture
 include("duet.jl")
 
 end

@@ -9,11 +9,33 @@ import StatsBase
 
 @testset "IndependentComponentAnalysis.jl" begin
 
+
+    @testset "mixture" begin
+        @info "Testing mixture"
+
+        s = [randn(10) for i = 1:2]
+        m = mixture(s, [1,0])
+        @test m == s[1]
+        m = mixture(s, [1,0], [1,0])
+        @test m == s[1][2:end]
+        m = mixture(s, [1,0], [0,1])
+        @test m == s[1][1:end-1]
+
+        m = mixture(s, [[1,0], [0,0]])
+        @test m[1] == s[1]
+        m = mixture(s, [[1,0], [0,0]], [[1,0], [0,0]])
+        @test m[1] == s[1][2:end]
+        m = mixture(s, [[1,0], [0,0]], [[0,1], [0,0]])
+        @test m[1] == s[1][1:end-1]
+
+
+    end
+
     @testset "duet" begin
         @info "Testing duet"
         include("test_duet.jl")
     end
-    
+
 
     @testset "ICA" begin
 

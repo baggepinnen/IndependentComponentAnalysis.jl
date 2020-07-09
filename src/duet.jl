@@ -207,3 +207,39 @@ function duet(
     est, H
 
 end
+
+
+"""
+    mix = mixture(signals, amps, [delays::Vector{Int}])
+    mixes = mixture(signals, amps::Vector{Vector}, [delays::Vector{Vector{Int}}])
+
+Mix together signals using amplitudes `amps` and `delays` (`delays` is specified in samples). If `amps` and the optional `delays` are vectors of vectors, then a vector of mixtures is returned. A vector of vectors is converted to a matrix using `M = reduce(hcat, mixes)`.
+
+The returned signals will be shorter than the input signals corresponding to the maximum difference between delays, e.g., if `delays = [-2,0,5]`, the returned mixture will be 7 samples shorter.
+"""
+function mixture(signals, amps, delays::Vector{Int}=zeros(Int, length(amps)))
+    length(signals) == length(amps) == length(delays) || throw(ArgumentError("The length of the inputs must be the same"))
+    N = length(signals[1])
+    mind, maxd = extrema(delays)
+    maxdiff = maxd-mind
+    Nn = N-maxdiff-mind
+    ind = -mind+1:Nn
+    inds = [ind .+ d for d in delays]
+    sum(amps[i]*signals[i][inds[i]] for i in eachindex(signals))
+end
+
+
+
+function mixture(signals, amps::Vector{<:Vector{<:Number}}, delays::Vector{Vector{Int}}=[zeros(Int, length(a)) for a in amps])
+    Nmix = length(amps)
+    N = length(signals[1])
+    mind, maxd = extrema(reduce(vcat,delays))
+    maxdiff = maxd-mind
+    Nn = N-maxdiff-mind
+    ind = -mind+1:Nn
+    map(amps, delays) do amps, delays
+        length(signals) == length(amps) == length(delays) || throw(ArgumentError("The length of the inputs must be the same"))
+        inds = [ind .+ d for d in delays]
+        sum(amps[i]*signals[i][inds[i]] for i in eachindex(signals))
+    end
+end

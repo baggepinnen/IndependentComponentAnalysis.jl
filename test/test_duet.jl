@@ -23,9 +23,10 @@ est, H = duet(
     onesided = true,
 )
 if isinteractive()
-    plot(est, lab = "Estimated components", c = :blue)
-    plot!([x1 x2], lab = "True signal", c = :green)
-    plot!([r1 r2], lab = "Received signal", c = :red) |> display
+    plotinds = 10000:10200
+    plot(plotinds, est[plotinds,:], lab = "Estimated components", c = :blue)
+    plot!(plotinds, [x1 x2][plotinds,:], lab = "True signal", c = :black)
+    plot!(plotinds, [r1 r2][plotinds,:], lab = "Received signal", c = :orange) |> display
 end
 
 @test any(<(0), H.av)

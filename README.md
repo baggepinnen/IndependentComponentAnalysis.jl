@@ -81,3 +81,10 @@ plot(H) |> display
 ```
 ![signals](figs/signals.svg)
 ![hist](figs/hist.svg)
+
+### Creating mixture signals
+```julia
+mix   = mixture(signals, amps, [delays::Vector{Int}])
+mixes = mixture(signals, amps::Vector{Vector}, [delays::Vector{Vector{Int}}])
+```
+Mixes together signals using amplitudes `amps` and `delays` (`delays` is specified in samples). If `amps` and the optional `delays` are vectors of vectors, then a vector of mixtures is returned. A vector of vectors is converted to a matrix using `M = reduce(hcat, mixes)`.
