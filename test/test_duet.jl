@@ -1,3 +1,4 @@
+using DSP
 @testset "istft" begin
     @info "Testing istft"
 
