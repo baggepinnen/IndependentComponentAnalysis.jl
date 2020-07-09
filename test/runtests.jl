@@ -21,6 +21,13 @@ import StatsBase
         m = mixture(s, [1,0], [0,1])
         @test m == s[1][1:end-1]
 
+        m = mixture(s, [1,0])
+        @test m == s[1]
+        m = mixture(s, [1,0], [-1,0])
+        @test m == s[1][1:end-1]
+        m = mixture(s, [1,0], [0,-1])
+        @test m == s[1][2:end]
+
         m = mixture(s, [[1,0], [0,0]])
         @test m[1] == s[1]
         m = mixture(s, [[1,0], [0,0]], [[1,0], [0,0]])
