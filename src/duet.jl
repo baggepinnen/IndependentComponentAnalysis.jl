@@ -52,7 +52,7 @@ function find_extrema(A, n)
     inds[perm[1:min(n,length(perm))]]
 end
 
-function separate(x1::AbstractArray{T},x2,αpeak::Vector{<:Real}, δpeak::Vector{<:Real}, S1, S2, freqs, nfft; kwargs...) where T
+function separate(x1::AbstractArray{T},x2,αpeak::Vector{<:Real}, δpeak::Vector{<:Real}, S1, S2, freqs, n; kwargs...) where T
     numsources = length(αpeak)
     αpeak = @. (αpeak + sqrt(αpeak^2 + 4)) / 2
 
@@ -75,7 +75,7 @@ function separate(x1::AbstractArray{T},x2,αpeak::Vector{<:Real}, δpeak::Vector
             zeros(eltype(S1), 1, size(S1, 2)) # Add in zero DC component
             @. ((S1 + αpeak[i] * cis(δpeak[i] * freqs) * S2) / (1 + αpeak[i]^2)) * mask
         ]
-        istft(M, nfft, nfft÷2; kwargs...)
+        istft(M, n, n÷2; kwargs...)
     end
     reduce(hcat, est), masks
 end
@@ -154,8 +154,9 @@ function duet(
     x2,
     n_sources,
     n     = 1024;
+    nfft  = n,
     p     = 1,
-    q     = 0, # powers used to weight histogram
+    q     = 0,
     amax  = 0.7,
     dmax  = 3.6,
     abins = 35,
@@ -168,16 +169,14 @@ function duet(
     kwargs...,
 )
 
-    S1 = stft(x1, n, n÷2; window = window, onesided=onesided, kwargs...)
-    S2 = stft(x2, n, n÷2; window = window, onesided=onesided, kwargs...)
+    S1 = stft(x1, n, n÷2; nfft = nfft, window = window, onesided=onesided, kwargs...)
+    S2 = stft(x2, n, n÷2; nfft = nfft, window = window, onesided=onesided, kwargs...)
     S1, S2 = S1[2:end, :], S2[2:end, :] # remove dc
     if onesided
-        # freqs = FFTW.rfftfreq(n)[2:end] .* (2pi)
-        freqs = (1:n÷2) .* (2pi / n) # We don't need the negative freqs since we use onesided
+        freqs = FFTW.rfftfreq(nfft)[2:end] .* (2pi)
     else
-        # freqs = [(1:n÷2); -reverse((1:n÷2))] .* (2pi / n)
-        freqs = FFTW.fftfreq(n)[2:end] .* (2pi)
-        freqs = freqs[1:size(S1, 1)]
+        freqs = FFTW.fftfreq(nfft)[2:end] .* (2pi)
+        # freqs = freqs[1:size(S1, 1)]
     end
 
     R21 = (S2 .+ eps()) ./ (S1 .+ eps()) # ratio of spectrograms
@@ -185,7 +184,7 @@ function duet(
     α = @. α - 1 / α # symmetric attenuation
 
     if bigdelay
-        Δω = 2pi / n
+        Δω = 2pi / nfft
         Δω*dmax > π && @warn("frequency resolution not sufficient for the chosen maximum delay.")
         δ0 = @. R21 * conj(S2)/S1 / abs2(R21)
         if kernel_sizeδ > 0
@@ -217,7 +216,7 @@ function duet(
     av = [ar[i[1]] for i in inds]
     dv = [dr[i[2]] for i in inds]
 
-    est, masks = separate(x1,x2, av, dv, S1, S2, freqs, n; (window=window, onesided=onesided, kwargs...)...)
+    est, masks = separate(x1,x2, av, dv, S1, S2, freqs, n; (nfft=nfft, window=window, onesided=onesided, kwargs...)...)
     H = DUET(A,ar,dr,av,dv,α,δ,masks)
 
     est, H
