@@ -52,40 +52,52 @@ function find_extrema(A, n)
     inds[perm[1:min(n,length(perm))]]
 end
 
-function separate(x1::AbstractArray{T},x2,αpeak::Vector{<:Real}, δpeak::Vector{<:Real}, S1, S2, fmat, nfft; kwargs...) where T
+function separate(x1::AbstractArray{T},x2,αpeak::Vector{<:Real}, δpeak::Vector{<:Real}, S1, S2, freqs, nfft; kwargs...) where T
     numsources = length(αpeak)
     αpeak = @. (αpeak + sqrt(αpeak^2 + 4)) / 2
 
     bestsofar = fill(T(Inf), size(S1))
     bestind = zeros(Int, size(S1))
     for i = 1:numsources
-        score = @. abs(αpeak[i] * cis(-fmat * δpeak[i]) * S1 - S2)^2 /
+        score = @. abs(αpeak[i] * cis(-freqs * δpeak[i]) * S1 - S2)^2 /
            (1 + αpeak[i]^2)
         mask = score .< bestsofar
         bestind[mask] .= i
         bestsofar[mask] .= score[mask]
     end
-    est = map(1:numsources) do i
+    masks = map(1:numsources) do i
         mask = bestind .== i
+    end
+    est = map(1:numsources) do i
+        # mask = imfilter(masks[i], Kernel.gaussian(1))
+        mask = masks[i]
         M = [
             zeros(eltype(S1), 1, size(S1, 2)) # Add in zero DC component
-            @. ((S1 + αpeak[i] * cis(δpeak[i] * fmat) * S2) / (1 + αpeak[i]^2)) * mask
+            @. ((S1 + αpeak[i] * cis(δpeak[i] * freqs) * S2) / (1 + αpeak[i]^2)) * mask
         ]
         istft(M, nfft, nfft÷2; kwargs...)
     end
-    reduce(hcat, est)
+    reduce(hcat, est), masks
 end
 
 
 
 struct DUET
+    "histogram"
     A
+    "ranges for amp and delay values"
     ar
+    "ranges for amp and delay values"
     dr
+    "peak locations"
     av
+    "peak locations"
     dv
+    "amp map"
     α
+    "delay map"
     δ
+    masks
 end
 
 @recipe function plot(h::DUET)
@@ -106,20 +118,23 @@ end
 
 """
     est, H = duet( x1, x2, n_sources, n = 1024;
-        p           = 1, # amplitude power used to weight histogram
-        q           = 0, # delay power used to weight histogram
-        amax        = 0.7,
-        dmax        = 3.6,
-        abins       = 35,
-        dbins       = 50,
-        kernel_size = 1, # Controls the smoothing of the histogram.
-        window      = hanning,
+        p            = 1, # amplitude power used to weight histogram
+        q            = 0, # delay power used to weight histogram
+        amax         = 0.7,
+        dmax         = 3.6,
+        abins        = 35, # number of histogram bins
+        dbins        = 50, # number of histogram bins
+        kernel_size  = 1, # Controls the smoothing of the histogram.
+        window       = hanning,
+        bigdelay     = false,
+        kernel_sizeδ = 0.1,
         kwargs..., # These are sent to the stft function
     )
 
 DUET is an algorithm for blind source separation. It works on stereo mixtures and can separate any number of sources as long as they do not overlap in the time-frequency domain.
 
 ## `p` and `q`
+The paper gives the following guidelines:
 - `p = 0, q = 0`: the counting histogram proposed in the original DUET algorithm
 - `p = 1, q = 0`: motivated by the ML symmetric attenuation estimator
 - `p = 1, q = 2`: motivated by the ML delay estimator
@@ -129,6 +144,8 @@ From the paper referenced below:
 "`p = 1, q = 0` is a good default choice. When the sources are not
 equal power, we would suggest `p = 0.5, q = 0` as it prevents the dominant
 source from hiding the smaller source peaks in the histogram."
+
+- `bigdelay` indicates whether or not the two microphones are far apart. If `true`, the delay `δ` is estimated using the differential method (see the paper sec 8.4.1) and the delay map is smoothed using `kernel_sizeδ`.
 
 Implementation based on *Rickard, Scott. (2007). The DUET blind source separation algorithm. 10.1007/978-1-4020-6479-1_8.*
 """
@@ -147,7 +164,7 @@ function duet(
     window = hanning,
     onesided = true,
     bigdelay = false,
-    kernel_sizeδ = 1,
+    kernel_sizeδ = 0.1,
     kwargs...,
 )
 
@@ -155,12 +172,12 @@ function duet(
     S2 = stft(x2, n, n÷2; window = window, onesided=onesided, kwargs...)
     S1, S2 = S1[2:end, :], S2[2:end, :] # remove dc
     if onesided
-        freq = (1:n÷2) .* (2pi / n) # We don't need the negative freqs since we use onesided
-        fmat = freq
+        # freqs = FFTW.rfftfreq(n)[2:end] .* (2pi)
+        freqs = (1:n÷2) .* (2pi / n) # We don't need the negative freqs since we use onesided
     else
-        freq = [(1:n÷2); -reverse((1:n÷2))] .* (2pi / n)
-        # length(freq) < size(S1, 2) && throw(ArgumentError("n = $n is too small for the provided signal"))
-        fmat = freq[1:size(S1, 1)]
+        # freqs = [(1:n÷2); -reverse((1:n÷2))] .* (2pi / n)
+        freqs = FFTW.fftfreq(n)[2:end] .* (2pi)
+        freqs = freqs[1:size(S1, 1)]
     end
 
     R21 = (S2 .+ eps()) ./ (S1 .+ eps()) # ratio of spectrograms
@@ -169,17 +186,18 @@ function duet(
 
     if bigdelay
         Δω = 2pi / n
-        δ = @. angle(R21 * conj(S2)/(S1 + eps()) / abs2.(R21)) / Δω
-        if kernel_size > 0
-            K = KernelFactors.gaussian(kernel_sizeδ)
-            δ = imfilter(δ, kernelfactors((K,K)))
+        Δω*dmax > π && @warn("frequency resolution not sufficient for the chosen maximum delay.")
+        δ0 = @. R21 * conj(S2)/S1 / abs2(R21)
+        if kernel_sizeδ > 0
+            δ0 = imfilt(δ0, kernel_sizeδ) # It appears to be slightly better to filter before angle, but more tests needed
         end
+        δ = @. -angle(δ0) / freqs # NOTE: I removed the Δω divisor here and it seems to have made it more stable
     else
-        δ = @. -angle(R21) / fmat # 'δ ' relative delay
+        δ = @. -angle(R21) / freqs # δ relative delay
     end
 
 
-    Sweight = @. (abs(S1) * abs(S2))^p * abs(fmat)^q # weights
+    Sweight = @. (abs(S1) * abs(S2))^p * abs(freqs)^q # weights
 
     αmask = @. (abs(α) < amax) & (abs(δ) < dmax)
     α_vec = α[αmask]
@@ -191,8 +209,7 @@ function duet(
     # FULL-SPARSE TRICK TO CREATE 2D WEIGHTED HISTOGRAM
     A = Matrix(sparse(αind, δind, Sweight, abins, dbins))
     if kernel_size > 0
-        K = KernelFactors.gaussian(kernel_size)
-        A = imfilter(A, kernelfactors((K,K)))
+        A = imfilt(A, kernel_size)
     end
     # abins, dbins = size(A)
     ar,dr = LinRange(-amax , amax , abins ), LinRange(-dmax , dmax , dbins )
@@ -200,13 +217,23 @@ function duet(
     av = [ar[i[1]] for i in inds]
     dv = [dr[i[2]] for i in inds]
 
-    H = DUET(A,ar,dr,av,dv,α,δ)
-
-    est = separate(x1,x2, av, dv, S1, S2, fmat, n; (window=window, onesided=onesided, kwargs...)...)
+    est, masks = separate(x1,x2, av, dv, S1, S2, freqs, n; (window=window, onesided=onesided, kwargs...)...)
+    H = DUET(A,ar,dr,av,dv,α,δ,masks)
 
     est, H
-
 end
+
+function imfilt(x,kernel_size)
+    K = KernelFactors.gaussian(kernel_size)
+    imfilter(x, kernelfactors((K,K)))
+end
+
+function imfilt1(x,kernel_size)
+    K = KernelFactors.gaussian(kernel_size)
+    imfilter(x, K[:,1:1])
+end
+
+
 
 
 """
