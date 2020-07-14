@@ -52,32 +52,43 @@ function find_extrema(A, n)
     inds[perm[1:min(n,length(perm))]]
 end
 
-function separate(x1::AbstractArray{T},x2,αpeak::Vector{<:Real}, δpeak::Vector{<:Real}, S1, S2, freqs, n; kwargs...) where T
-    numsources = length(αpeak)
-    αpeak = @. (αpeak + sqrt(αpeak^2 + 4)) / 2
+function separate(αₚ::Vector{<:Real}, δₚ::Vector{<:Real}, S1::Matrix{Complex{T}}, S2, freqs, n; kwargs...) where T
+    N_sources = length(αₚ)
+    αₚ = @. (αₚ + sqrt(αₚ^2 + 4)) / 2 # Do not inplace this
 
-    bestsofar = fill(T(Inf), size(S1))
-    bestind = zeros(Int, size(S1))
-    for i = 1:numsources
-        score = @. abs(αpeak[i] * cis(-freqs * δpeak[i]) * S1 - S2)^2 /
-           (1 + αpeak[i]^2)
-        mask = score .< bestsofar
+    cisδf = Vector{Complex{T}}(undef, length(freqs))
+    bestsofar = fill(T(Inf), size(S1,1)-1, size(S1,2))
+    bestind = zeros(Int, size(S1,1)-1, size(S1,2))
+    mask = BitArray{2}(undef, size(bestsofar))
+    for i = 1:N_sources
+        den = 1 + αₚ[i]^2
+        @. cisδf = cis(-freqs * δₚ[i])
+        @views score = @. abs2(αₚ[i] * cisδf * S1[2:end,:] - S2[2:end,:]) /
+           den
+        mask .= score .< bestsofar
         bestind[mask] .= i
         bestsofar[mask] .= score[mask]
     end
-    masks = map(1:numsources) do i
+    masks = map(1:N_sources) do i
         mask = bestind .== i
     end
-    est = map(1:numsources) do i
+    spectrograms = map(1:N_sources) do i
         # mask = imfilter(masks[i], Kernel.gaussian(1))
         mask = masks[i]
-        M = [
-            zeros(eltype(S1), 1, size(S1, 2)) # Add in zero DC component
-            @. ((S1 + αpeak[i] * cis(δpeak[i] * freqs) * S2) / (1 + αpeak[i]^2)) * mask
-        ]
-        istft(M, n, n÷2; kwargs...)
+        den = 1 + αₚ[i]^2
+        # S = [
+        #     zeros(eltype(S1), 1, size(S1, 2)) # Add in zero DC component
+        #     @. ((S1 + αₚ[i] * cis(δₚ[i] * freqs) * S2) / (1 + αₚ[i]^2)) * mask
+        # ]
+        S = similar(S1) .= 0
+        @. cisδf = cis(freqs * δₚ[i])
+        @views @. S[2:end,:] = ((S1[2:end,:] + αₚ[i] * cisδf * S2[2:end,:]) / den) * mask
+        S
     end
-    reduce(hcat, est), masks
+    est = map(spectrograms) do S
+        istft(S, n, n÷2; kwargs...)
+    end
+    reduce(hcat, est), masks, spectrograms
 end
 
 
@@ -98,6 +109,7 @@ struct DUET
     "delay map"
     δ
     masks
+    spectrograms
 end
 
 @recipe function plot(h::DUET)
@@ -145,7 +157,11 @@ From the paper referenced below:
 equal power, we would suggest `p = 0.5, q = 0` as it prevents the dominant
 source from hiding the smaller source peaks in the histogram."
 
+For large delays, it appears to be more efficient to set `dmax` to something small (20), `nfft ≈ 8n, p=0.5, q=2`
+
 - `bigdelay` indicates whether or not the two microphones are far apart. If `true`, the delay `δ` is estimated using the differential method (see the paper sec 8.4.1) and the delay map is smoothed using `kernel_sizeδ`.
+
+
 
 Implementation based on *Rickard, Scott. (2007). The DUET blind source separation algorithm. 10.1007/978-1-4020-6479-1_8.*
 """
@@ -171,7 +187,9 @@ function duet(
 
     S1 = stft(x1, n, n÷2; nfft = nfft, window = window, onesided=onesided, kwargs...)
     S2 = stft(x2, n, n÷2; nfft = nfft, window = window, onesided=onesided, kwargs...)
-    S1, S2 = S1[2:end, :], S2[2:end, :] # remove dc
+    # S1, S2 = S1[2:end, :], S2[2:end, :] # remove dc
+    S1[1, :] .= 0; S2[1, :] .= 0 # remove dc
+    @views S1w, S2w = S1[2:end,:], S2[2:end,:]
     if onesided
         freqs = FFTW.rfftfreq(nfft)[2:end] .* (2pi)
     else
@@ -179,14 +197,14 @@ function duet(
         # freqs = freqs[1:size(S1, 1)]
     end
 
-    R21 = (S2 .+ eps()) ./ (S1 .+ eps()) # ratio of spectrograms
+    R21 = (S2w .+ eps()) ./ (S1w .+ eps()) # ratio of spectrograms
     α = abs.(R21) # relative attenuation
     α = @. α - 1 / α # symmetric attenuation
 
     if bigdelay
         Δω = 2pi / nfft
         Δω*dmax > π && @warn("frequency resolution not sufficient for the chosen maximum delay.")
-        δ0 = @. R21 * conj(S2)/S1 / abs2(R21)
+        δ0 = @. R21 * conj(S2w)/S1w / abs2(R21)
         if kernel_sizeδ > 0
             δ0 = imfilt(δ0, kernel_sizeδ) # It appears to be slightly better to filter before angle, but more tests needed
         end
@@ -196,7 +214,7 @@ function duet(
     end
 
 
-    Sweight = @. (abs(S1) * abs(S2))^p * abs(freqs)^q # weights
+    Sweight = @. (abs(S1w) * abs(S2w))^p * abs(freqs)^q # weights
 
     αmask = @. (abs(α) < amax) & (abs(δ) < dmax)
     α_vec = α[αmask]
@@ -216,8 +234,8 @@ function duet(
     av = [ar[i[1]] for i in inds]
     dv = [dr[i[2]] for i in inds]
 
-    est, masks = separate(x1,x2, av, dv, S1, S2, freqs, n; (nfft=nfft, window=window, onesided=onesided, kwargs...)...)
-    H = DUET(A,ar,dr,av,dv,α,δ,masks)
+    est, masks, spectrograms = separate(av, dv, S1, S2, freqs, n; (nfft=nfft, window=window, onesided=onesided, kwargs...)...)
+    H = DUET(A,ar,dr,av,dv,α,δ,masks,spectrograms)
 
     est, H
 end
