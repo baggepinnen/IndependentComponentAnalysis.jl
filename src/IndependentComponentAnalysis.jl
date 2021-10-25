@@ -93,7 +93,7 @@ function ica!(::FastICA, W::AbstractMatrix{T},      # initialized component matr
                   X::AbstractMatrix{T},      # (whitened) observation sample matrix, size(m, n)
                   fun::ICAGDeriv,         # approximate neg-entropy functor
                   maxiter::Int,           # maximum number of iterations
-                  tol::Real) where T<:Real# convergence tolerance
+                  tol::Real) where T      # convergence tolerance
 
     # argument checking
     m = size(W, 1)
@@ -125,7 +125,7 @@ function ica!(::FastICA, W::AbstractMatrix{T},      # initialized component matr
         copyto!(Wp, W)
 
         # apply W of previous step
-        mul!(U, transpose(X), W) # u <- w'x
+        mul!(U, X', W) # u <- w'x
 
         # compute g(w'x) --> U and E{g'(w'x)} --> E1
         update_UE!(fun, U, E1)
