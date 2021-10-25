@@ -33,10 +33,10 @@ Tanh() = Tanh{Float32}(1.0f0)
 evaluate(f::Tanh{T}, x::T) where T<:Real = (a = f.a; t = tanh(a * x); (t, a * (1 - t * t)))
 
 
-function update_UE!(f::Tanh{T}, U::AbstractMatrix{T}, E1::AbstractVector{T}) where T
+function update_UE!(f::Tanh, U::AbstractMatrix{T}, E1::AbstractVector{T}) where T
     n,k = size(U)
     _s = zero(T)
-    a = f.a
+    a = T(f.a)
     @inbounds for j = 1:k
         @simd for i = 1:n
             t = SLEEFPirates.tanh_fast(a * U[i,j])
