@@ -132,6 +132,7 @@ import StatsBase
             W = M.W
             @test W'C * W ≈ Matrix(I, k, k)
 
+            # These might not converge due to the lack of whitening, the result is therefore not tested
             fit(ICA, X, k; do_whiten=true, tol=0.01)
             fit(ICA, X, k, fun=Gaus(); do_whiten=true, tol=0.01)
 
