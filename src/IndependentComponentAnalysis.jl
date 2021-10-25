@@ -47,6 +47,20 @@ function update_UE!(f::Tanh, U::AbstractMatrix{T}, E1::AbstractVector{T}) where 
     end
 end
 
+function update_UE!(f::Tanh{T}, U::AbstractMatrix{CT}, E1::AbstractVector) where {T, CT <: Complex}
+    n,k = size(U)
+    _s = zero(T)
+    a = f.a
+    @inbounds for j = 1:k
+        for i = 1:n
+            t = complex(SLEEFPirates.tanh_fast(a * real(U[i,j])), SLEEFPirates.tanh_fast(a * imag(U[i,j])))
+            U[i,j] = t
+            _s += a * (1 - abs2(t))
+        end
+        E1[j] = _s / n
+    end
+end
+
 struct Gaus <: ICAGDeriv end
 
 evaluate(f::Gaus, x::T) where T<:Real = (x2 = x * x; e = exp(-x2/2); (x * e, (1 - x2) * e))
