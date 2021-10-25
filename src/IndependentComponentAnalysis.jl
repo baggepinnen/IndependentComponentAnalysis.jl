@@ -71,7 +71,7 @@ function update_UE!(f::Gaus, U::AbstractMatrix{T}, E1::AbstractVector{T}) where 
     @inbounds for j = 1:k
         @avx for i = 1:n
             u = U[i,j]
-            u2 = u^2
+            u2 = abs2(u)
             e = exp(-u2/2)
             U[i,j] = u * e
             _s += (1 - u2) * e
