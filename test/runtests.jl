@@ -2,13 +2,11 @@ using IndependentComponentAnalysis
 using IndependentComponentAnalysis: evaluate
 using Test
 using LinearAlgebra
-using Test
-import Statistics: mean, cov
+import Statistics: mean, cov, cor
 import Random
-import StatsBase
 
 @testset "IndependentComponentAnalysis.jl" begin
-
+    Random.seed!(15678)
 
     @testset "mixture" begin
         @info "Testing mixture"
@@ -51,7 +49,7 @@ import StatsBase
         function generatetestdata(n, k, m)
             t = range(0.0, step=10.0, length=n)
             s1 = sin.(t * 2)
-            s2 = s2 = 1.0 .- 2.0 * Bool[isodd(floor(Int, x / 3)) for x in t]
+            s2 = 1.0 .- 2.0 * Bool[isodd(floor(Int, x / 3)) for x in t]
             s3 = Float64[mod(x, 5.0) for x in t]
 
             s1 += 0.1 * randn(n)
@@ -104,6 +102,56 @@ import StatsBase
 
         end
 
+        @testset "Nonlinear updates" begin
+            for T in (Float32, Float64), f in (Tanh(T(1.5)), Gaus())
+                U = T[0.1 1.0 -0.5; 0.2 2.0 -1.0; 0.3 3.0 -1.5]
+                expected = map(x -> evaluate(f, x), U)
+                E = zeros(T, size(U, 2))
+                IndependentComponentAnalysis.update_UE!(f, U, E)
+                @test U ≈ first.(expected)
+                @test E ≈ vec(mean(last.(expected), dims=1))
+            end
+        end
+
+        @testset "Rectangular convergence" begin
+            X = Float64[1 1 1 1 -1 -1 -1 -1;
+                        1 1 -1 -1 1 1 -1 -1;
+                        1 -1 1 -1 1 -1 1 -1]
+            for f in (Tanh(1.0), Gaus())
+                W = Float64[1 0; 0 1; 0 0]
+                @test_logs ica!(FastICA(), W, X, f, 2, 1e-8)
+                @test W ≈ Float64[1 0; 0 1; 0 0]
+            end
+        end
+
+        @testset "ICA input validation" begin
+            X = randn(Random.MersenneTwister(2), 3, 100)
+            @test_throws ArgumentError fit(ICA, X, 0)
+            @test_throws ArgumentError fit(ICA, X, -1)
+            @test_throws ArgumentError fit(ICA, X, 4)
+            for do_whiten in (true, false)
+                rows = do_whiten ? 2 : size(X, 1)
+                @test_throws DimensionMismatch fit(ICA, X, 2;
+                    do_whiten=do_whiten, winit=ones(rows, 1), tol=Inf)
+                @test_throws DimensionMismatch fit(ICA, X, 2;
+                    do_whiten=do_whiten, winit=ones(rows + 1, 2), tol=Inf)
+            end
+        end
+
+        @testset "Source recovery" begin
+            rng = Random.MersenneTwister(45)
+            S = randn(rng, 3, 5000).^3
+            X = [1.0 0.3 -0.2; 0.5 1.0 0.4; -0.1 0.2 1.0] * S
+            for f in (Tanh(1.0), Gaus())
+                M = @test_logs fit(ICA, X, 3;
+                    alg=FastICA(), fun=f, winit=Matrix{Float64}(I, 3, 3), maxiter=500)
+                recovered = transform(M, X)
+                correlations = abs.(cor(S, recovered, dims=2))
+                @test all(vec(maximum(correlations, dims=2)) .> 0.98)
+                @test length(unique(argmax(correlations, dims=2))) == size(S, 1)
+            end
+        end
+
         ## data
         @testset "Algorithm" begin
 
@@ -132,7 +180,6 @@ import StatsBase
             W = M.W
             @test W'C * W ≈ Matrix(I, k, k)
 
-            # These might not converge due to the lack of whitening, the result is therefore not tested
             fit(ICA, X, k; do_whiten=true, tol=0.01)
             fit(ICA, X, k, fun=Gaus(); do_whiten=true, tol=0.01)
 

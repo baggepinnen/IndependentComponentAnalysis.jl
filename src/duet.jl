@@ -1,8 +1,14 @@
-using DSP, ImageFiltering, Images, SparseArrays, FFTW, RecipesBase
+using DSP, ImageFiltering, SparseArrays, FFTW, RecipesBase
 
 import DSP.Periodograms: compute_window
 
 function istft(S::AbstractMatrix{Complex{T}}, wlen::Int, overlap::Int=wlen÷2; onesided=true, nfft=nextfastfft(wlen), window=hanning) where T
+    wlen > 0 || throw(ArgumentError("The window length must be positive."))
+    0 <= overlap < wlen || throw(ArgumentError("The overlap must be nonnegative and smaller than the window length."))
+    nfft >= wlen || throw(ArgumentError("The transform length must be at least the window length."))
+    expected_rows = onesided ? nfft ÷ 2 + 1 : nfft
+    size(S, 1) == expected_rows || throw(DimensionMismatch("The spectrum size does not match the transform length."))
+    size(S, 2) > 0 || throw(ArgumentError("The spectrogram must contain at least one frame."))
     winc = wlen-overlap
     win, norm2 = compute_window(window, wlen)
     win² = win.^2
