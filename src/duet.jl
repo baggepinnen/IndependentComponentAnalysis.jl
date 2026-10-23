@@ -210,11 +210,14 @@ function duet(
     if bigdelay
         Δω = 2pi / nfft
         Δω*dmax > π && @warn("frequency resolution not sufficient for the chosen maximum delay.")
-        δ0 = @. R21 * conj(S2w)/S1w / abs2(R21)
+        size(R21, 1) > 1 || throw(ArgumentError("Large-delay estimation requires at least two nonzero frequency bins."))
+        δ0 = similar(R21)
+        @views @. δ0[1:end-1, :] = R21[2:end, :] * conj(R21[1:end-1, :])
+        δ0[end, :] .= δ0[end-1, :]
         if kernel_sizeδ > 0
-            δ0 = imfilt(δ0, kernel_sizeδ) # It appears to be slightly better to filter before angle, but more tests needed
+            δ0 = imfilt(δ0, kernel_sizeδ)
         end
-        δ = @. -angle(δ0) / freqs # NOTE: I removed the Δω divisor here and it seems to have made it more stable
+        δ = @. -angle(δ0) / Δω
     else
         δ = @. -angle(R21) / freqs # δ relative delay
     end

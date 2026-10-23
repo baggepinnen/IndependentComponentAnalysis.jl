@@ -91,3 +91,17 @@ isinteractive() && plot(
     ylabel = "",
     xlabel = "",
 )
+
+@testset "DUET large delays" begin
+    rng = Random.MersenneTwister(29)
+    x1 = repeat(randn(rng, 256), 16)
+    for delay in (-7, 7), smoothing in (0.0, 0.1, 1.0), onesided in (true, false)
+        x2 = 0.7 .* circshift(x1, delay)
+        est, H = duet(x1, x2, 1, 256; window=DSP.rect, bigdelay=true,
+            amax=2.0, dmax=12, abins=41, dbins=49, kernel_size=0,
+            kernel_sizeδ=smoothing, onesided=onesided)
+        @test H.dv ≈ [delay]
+        @test all(isapprox.(H.δ, delay; atol=1e-8))
+        @test size(est) == (length(x1), 1)
+    end
+end
