@@ -5,6 +5,8 @@ using LinearAlgebra
 import Statistics: mean, cov, cor
 import Random
 
+include("test_features.jl")
+
 @testset "IndependentComponentAnalysis.jl" begin
     Random.seed!(15678)
 

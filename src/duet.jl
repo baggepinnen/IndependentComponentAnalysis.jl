@@ -47,48 +47,64 @@ function istft(S::AbstractMatrix{Complex{T}}, wlen::Int, overlap::Int=wlen÷2; o
 end
 
 
-function find_extrema(A, n)
-    # q = quantile(vec(A), 0.95)
-    # A = copy(A)
-    # A .= max.(A, q)
-    inds = findlocalmaxima(A)
-    isempty(inds) && error("Did not find any peaks in the delay/amplitude histogram, try modifying the `kernel_size` or any of the other parameters.")
-    amps = A[inds]
-    perm = sortperm(amps, rev=true)
-    inds[perm[1:min(n,length(perm))]]
+function find_extrema(A, n; min_peak_distance=0, min_peak_ratio=0)
+    peak = maximum(A)
+    isfinite(peak) && peak > 0 || throw(ArgumentError("No positive histogram energy remains. Check the energy threshold, attenuation bounds, and delay bounds."))
+    inds = filter(i -> A[i] > 0 && A[i] >= min_peak_ratio * peak, findlocalmaxima(A))
+    sort!(inds; by=i -> A[i], rev=true)
+    selected = CartesianIndex{2}[]
+    for i in inds
+        all(j -> hypot((i - j).I...) >= min_peak_distance, selected) || continue
+        push!(selected, i)
+        length(selected) == n && break
+    end
+    isempty(selected) && throw(ArgumentError("No distinct histogram peaks were found. Adjust histogram bounds, smoothing, or peak thresholds."))
+    if length(selected) < n
+        @warn "Fewer distinct histogram peaks than requested sources; returning only the detected sources." requested=n detected=length(selected)
+    end
+    return selected
 end
 
-function separate(αₚ::Vector{<:Real}, δₚ::Vector{<:Real}, S1::Matrix{Complex{T}}, S2, freqs, n; kwargs...) where T
+function separate(αₚ::Vector{<:Real}, δₚ::Vector{<:Real}, S1::Matrix{Complex{T}}, S2, freqs, n;
+                  reliable=trues(size(S1, 1)-1, size(S1, 2)), mask_type=:hard,
+                  mask_temperature=0.1, kwargs...) where T
     N_sources = length(αₚ)
-    αₚ = @. (αₚ + sqrt(αₚ^2 + 4)) / 2 # Do not inplace this
-
+    αₚ = @. (αₚ + sqrt(αₚ^2 + 4)) / 2
     cisδf = Vector{Complex{T}}(undef, length(freqs))
-    bestsofar = fill(T(Inf), size(S1,1)-1, size(S1,2))
-    bestind = zeros(Int, size(S1,1)-1, size(S1,2))
-    mask = BitArray{2}(undef, size(bestsofar))
-    for i = 1:N_sources
-        den = 1 + αₚ[i]^2
+    function model_score(i)
         @. cisδf = cis(-freqs * δₚ[i])
-        @views score = @. abs2(αₚ[i] * cisδf * S1[2:end,:] - S2[2:end,:]) /
-           den
-        mask .= score .< bestsofar
-        bestind[mask] .= i
-        bestsofar[mask] .= score[mask]
+        @views @. abs2(αₚ[i] * cisδf * S1[2:end,:] - S2[2:end,:]) / (1 + αₚ[i]^2)
     end
-    masks = map(1:N_sources) do i
-        mask = bestind .== i
+    if mask_type == :hard
+        bestsofar = fill(T(Inf), size(reliable))
+        bestind = zeros(Int, size(reliable))
+        for i in 1:N_sources
+            score = model_score(i)
+            selected = reliable .& (score .< bestsofar)
+            bestind[selected] .= i
+            bestsofar[selected] .= score[selected]
+        end
+        masks = [bestind .== i for i in 1:N_sources]
+    else
+        scores = map(model_score, 1:N_sources)
+        @views energy = abs2.(S1[2:end, :]) .+ abs2.(S2[2:end, :])
+        minimum_score = reduce((a, b) -> min.(a, b), scores)
+        masks = map(scores) do score
+            mask = zeros(T, size(reliable))
+            @. mask[reliable] = exp(-((score[reliable] - minimum_score[reliable]) /
+                energy[reliable]) / mask_temperature)
+            mask
+        end
+        total = reduce(+, masks)
+        for mask in masks
+            mask[reliable] ./= total[reliable]
+        end
     end
     spectrograms = map(1:N_sources) do i
-        # mask = imfilter(masks[i], Kernel.gaussian(1))
-        mask = masks[i]
-        den = 1 + αₚ[i]^2
-        # S = [
-        #     zeros(eltype(S1), 1, size(S1, 2)) # Add in zero DC component
-        #     @. ((S1 + αₚ[i] * cis(δₚ[i] * freqs) * S2) / (1 + αₚ[i]^2)) * mask
-        # ]
-        S = similar(S1) .= 0
+        S = zeros(eltype(S1), size(S1))
         @. cisδf = cis(freqs * δₚ[i])
-        @views @. S[2:end,:] = ((S1[2:end,:] + αₚ[i] * cisδf * S2[2:end,:]) / den) * mask
+        @views @. S[2:end,:] = ((S1[2:end,:] + αₚ[i] * cisδf * S2[2:end,:]) /
+            (1 + αₚ[i]^2)) * masks[i]
         S
     end
     est = map(spectrograms) do S
@@ -116,6 +132,8 @@ struct DUET
     δ
     masks
     spectrograms
+    "Time-frequency bins retained by the relative power threshold."
+    reliable_bins
 end
 
 @recipe function plot(h::DUET)
@@ -150,6 +168,28 @@ end
     )
 
 DUET is an algorithm for blind source separation. It works on stereo mixtures and can separate any number of sources as long as they do not overlap in the time-frequency domain.
+
+`min_bin_power` is a relative power threshold in `[0, 1)`, applied separately
+to each microphone's largest non-DC time-frequency bin. A bin is used only when
+both microphone powers exceed their thresholds. Excluded bins have zero masks
+and do not contribute to the histogram. The default excludes zero-power bins.
+`H.reliable_bins` records the retained bins, excluding the DC row.
+
+`mask_type=:hard` assigns each retained bin to its minimum-error source.
+`mask_type=:soft` uses weights proportional to
+`exp(-(score - minimum_score) / (mask_temperature * combined_bin_power))`,
+normalized to sum to one across sources in each retained bin. The score is the
+squared residual of the source's attenuation-delay model divided by
+`1 + attenuation^2`. `mask_temperature` must be finite and positive; smaller
+values produce more concentrated assignments. Soft masks do not guarantee
+improved separation when source models or histogram peaks are inaccurate.
+
+`min_peak_distance` sets the minimum Euclidean spacing between selected peaks
+in histogram-bin coordinates. `min_peak_ratio` excludes peaks below that fraction
+of the histogram maximum. Both default to zero. When fewer distinct peaks are
+available than requested, the function emits a warning and returns that smaller
+number of sources. A histogram without positive energy throws `ArgumentError`.
+Peak selection does not infer the physical number of sources.
 
 ## `p` and `q`
 The paper gives the following guidelines:
@@ -188,8 +228,28 @@ function duet(
     onesided = true,
     bigdelay = false,
     kernel_sizeδ = 0.1,
+    min_bin_power::Real = 0,
+    mask_type::Symbol = :hard,
+    mask_temperature::Real = 0.1,
+    min_peak_distance::Real = 0,
+    min_peak_ratio::Real = 0,
     kwargs...,
 )
+
+    length(x1) == length(x2) || throw(DimensionMismatch("Microphone signals must have equal lengths."))
+    n_sources isa Integer && n_sources > 0 || throw(ArgumentError("n_sources must be a positive integer."))
+    n > 1 && nfft >= n || throw(ArgumentError("The window length must exceed one and nfft must be at least the window length."))
+    length(x1) >= n || throw(ArgumentError("Signals must contain at least one complete window."))
+    all(isfinite, x1) && all(isfinite, x2) || throw(ArgumentError("Microphone signals must be finite."))
+    isfinite(amax) && amax > 0 && isfinite(dmax) && dmax > 0 || throw(ArgumentError("Attenuation and delay bounds must be finite and positive."))
+    abins isa Integer && abins > 1 && dbins isa Integer && dbins > 1 || throw(ArgumentError("Histogram dimensions must be integers greater than one."))
+    isfinite(p) && p >= 0 && isfinite(q) || throw(ArgumentError("Histogram powers must be finite and p must be nonnegative."))
+    isfinite(kernel_size) && kernel_size >= 0 && isfinite(kernel_sizeδ) && kernel_sizeδ >= 0 || throw(ArgumentError("Smoothing widths must be finite and nonnegative."))
+    isfinite(min_bin_power) && 0 <= min_bin_power < 1 || throw(ArgumentError("min_bin_power must be in [0, 1)."))
+    mask_type in (:hard, :soft) || throw(ArgumentError("mask_type must be :hard or :soft."))
+    isfinite(mask_temperature) && mask_temperature > 0 || throw(ArgumentError("mask_temperature must be finite and positive."))
+    isfinite(min_peak_distance) && min_peak_distance >= 0 || throw(ArgumentError("min_peak_distance must be finite and nonnegative."))
+    isfinite(min_peak_ratio) && 0 <= min_peak_ratio <= 1 || throw(ArgumentError("min_peak_ratio must be in [0, 1]."))
 
     S1 = stft(x1, n, n÷2; nfft = nfft, window = window, onesided=onesided, kwargs...)
     S2 = stft(x2, n, n÷2; nfft = nfft, window = window, onesided=onesided, kwargs...)
@@ -203,7 +263,10 @@ function duet(
         # freqs = freqs[1:size(S1, 1)]
     end
 
-    R21 = (S2w .+ eps()) ./ (S1w .+ eps()) # ratio of spectrograms
+    power1, power2 = abs2.(S1w), abs2.(S2w)
+    reliable = (power1 .> min_bin_power * maximum(power1)) .&
+               (power2 .> min_bin_power * maximum(power2))
+    R21 = map((s1, s2) -> iszero(s1) ? zero(s1) : s2 / s1, S1w, S2w)
     α = abs.(R21) # relative attenuation
     α = @. α - 1 / α # symmetric attenuation
 
@@ -214,6 +277,10 @@ function duet(
         δ0 = similar(R21)
         @views @. δ0[1:end-1, :] = R21[2:end, :] * conj(R21[1:end-1, :])
         δ0[end, :] .= δ0[end-1, :]
+        adjacent_reliable = copy(reliable)
+        @views adjacent_reliable[1:end-1, :] .&= reliable[2:end, :]
+        adjacent_reliable[end, :] .= adjacent_reliable[end-1, :]
+        δ0[.!adjacent_reliable] .= 0
         if kernel_sizeδ > 0
             δ0 = imfilt(δ0, kernel_sizeδ)
         end
@@ -225,7 +292,10 @@ function duet(
 
     Sweight = @. (abs(S1w) * abs(S2w))^p * abs(freqs)^q # weights
 
-    αmask = @. (abs(α) < amax) & (abs(δ) < dmax)
+    αmask = @. reliable & isfinite(Sweight) & (Sweight > 0) & (abs(α) < amax) & (abs(δ) < dmax)
+    if bigdelay
+        αmask .&= adjacent_reliable
+    end
     α_vec = α[αmask]
     δ_vec = δ[αmask]
     Sweight = Sweight[αmask]
@@ -239,12 +309,15 @@ function duet(
     end
     # abins, dbins = size(A)
     ar,dr = LinRange(-amax , amax , abins ), LinRange(-dmax , dmax , dbins )
-    inds = find_extrema(A, n_sources)
+    inds = find_extrema(A, n_sources; min_peak_distance=min_peak_distance,
+        min_peak_ratio=min_peak_ratio)
     av = [ar[i[1]] for i in inds]
     dv = [dr[i[2]] for i in inds]
 
-    est, masks, spectrograms = separate(av, dv, S1, S2, freqs, n; (nfft=nfft, window=window, onesided=onesided, kwargs...)...)
-    H = DUET(A,ar,dr,av,dv,α,δ,masks,spectrograms)
+    est, masks, spectrograms = separate(av, dv, S1, S2, freqs, n;
+        reliable=reliable, mask_type=mask_type, mask_temperature=mask_temperature,
+        (nfft=nfft, window=window, onesided=onesided, kwargs...)...)
+    H = DUET(A,ar,dr,av,dv,α,δ,masks,spectrograms,reliable)
 
     est, H
 end

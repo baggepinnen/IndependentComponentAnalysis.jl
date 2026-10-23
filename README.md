@@ -27,9 +27,44 @@ Xt = transform(ica, X)
 ```
 
 - The options for `fun` are `Tanh(a::Real)` and `Gaus()`
-- If you have also loaded MultivariateStats, a conflict will arise, cauing you to have to qualify `fun` like this: `IndependentComponentAnalysis.Tanh` etc. If [this PR](https://github.com/JuliaStats/MultivariateStats.jl/pull/122) is merged, this package will work better together with MultivariateStats.
+- MultivariateStats also exports `Tanh` and `Gaus`. When both packages are loaded, qualify these names as `IndependentComponentAnalysis.Tanh` and `IndependentComponentAnalysis.Gaus`.
 
+### Diagnostics and whitening
 
+```julia
+using Random
+
+model, info = fit(ICA, X, k;
+    rng = MersenneTwister(42),
+    return_info = true,
+    on_nonconvergence = :throw,
+)
+info.converged
+info.iterations
+info.residual
+info.numerical_rank
+```
+
+`return_info=true` returns the model and an `ICAInfo` record. The residual is the maximum absolute deviation of successive component inner-product magnitudes from unity. The default return value is an `ICA` model. Nonconvergence policies are `:log` (log an error and return the final iterate), `:throw` (throw `ConvergenceException`), and `:ignore` (return without logging). The low-level `ica!` function accepts the same diagnostics and nonconvergence options.
+
+Random initialization uses the supplied `rng`; `winit` bypasses random initialization and must have full column rank. Repeated fits with equivalent RNG states and inputs use the same initialization. Component signs and ordering are not identifiable across different fits.
+
+With whitening enabled, the numerical rank counts covariance eigenvalues greater than `max(rank_atol, rank_rtol * largest_eigenvalue)`. Defaults are `rank_atol=0` and `rank_rtol=sqrt(eps(eltype(X)))`. Requesting more components than this rank raises `ArgumentError`, including for constant data. The relative threshold excludes poorly conditioned covariance directions; decrease it explicitly if those directions are required. `info.numerical_rank` is `nothing` when whitening is disabled, in which case the input must already be whitened.
+
+### Mixing matrices and reconstruction
+
+```julia
+sources = transform(model, X)
+B = unmixingmatrix(model)
+A = mixingmatrix(model)
+X_reconstructed = reconstruct(model, sources)
+X_selected = reconstruct(model, sources; components=[1, 2])
+X_component = reconstruct(model, sources; components=1, add_mean=false)
+```
+
+`B` maps centered measurements to sources, and `A` is its Moore–Penrose pseudoinverse. Reconstruction accepts source vectors or matrices with one row per model component, including when selecting a subset. It adds the model mean once by default. Set `add_mean=false` when summing individual component contributions. An empty selection returns the mean, or zeros with `add_mean=false`.
+
+For an invertible square unmixing matrix, reconstruction of all components recovers the measurements. With fewer components than measurement channels, it returns a minimum-norm reconstruction in the retained subspace. The mixing matrix follows the fitted source scaling and ordering; it does not determine physical source amplitudes or labels.
 
 ## DUET
 
@@ -53,9 +88,27 @@ est, H = duet( x1, x2, n_sources, n = 1024;
 ```
 
 The returned values are `est::Matrix(time, n_sources)` and `H::DUET`.
-`H` can be plotted `plot(H)`, which shows the delay/amplitude histogram and the identified peaks. This can be used to tweak the input parameters.
+`H` can be plotted `plot(H)`, which shows the delay/amplitude histogram and the identified peaks. Use this histogram to inspect peak locations and select histogram parameters.
 
 - `bigdelay` indicates whether or not the two microphones are far apart. If `true`, the delay `δ` is estimated using the differential method (see the paper sec 8.4.1) and the delay map is smoothed using `kernel_sizeδ`.
+
+### Energy thresholds, masks, and peak selection
+
+```julia
+est, H = duet(x1, x2, n_sources, 1024;
+    min_bin_power = 1e-6,
+    mask_type = :soft,
+    mask_temperature = 0.1,
+    min_peak_distance = 3,
+    min_peak_ratio = 0.05,
+)
+```
+
+`min_bin_power` is a relative power threshold applied separately to each microphone's largest non-DC time-frequency bin. Both microphone powers must exceed their respective thresholds. Rejected bins contribute neither to the histogram nor to the reconstructed sources. `H.reliable_bins` records retained bins without the DC row. The default threshold is zero, excluding zero-power bins.
+
+The default `mask_type=:hard` assigns each retained bin to one source. `mask_type=:soft` distributes it across sources using normalized exponential weights of the attenuation-delay model errors, scaled by the combined microphone power. Smaller positive `mask_temperature` values produce more concentrated assignments. Soft masks sum to one across sources in each retained bin and to zero in rejected bins. They can reduce discontinuities in assignments, but do not guarantee improved separation quality.
+
+`min_peak_distance` specifies minimum Euclidean peak spacing in histogram-bin coordinates. `min_peak_ratio` excludes peaks below that fraction of the histogram maximum. Both default to zero. If fewer distinct peaks are found than requested, DUET emits a warning and returns only the detected sources; inspect `length(H.av)` and the histogram. If no positive histogram energy remains, DUET raises `ArgumentError` with guidance on thresholds and bounds. These controls do not estimate the physical source count automatically.
 
 #### Example:
 ```julia
