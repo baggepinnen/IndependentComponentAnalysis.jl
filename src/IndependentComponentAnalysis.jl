@@ -5,11 +5,71 @@ using Statistics, LinearAlgebra, Random
 using LoopVectorization
 using SLEEFPirates
 import MultivariateStats
+import MultivariateStats: reconstruct
 using MultivariateStats: _invsqrtm!, fullmean, ICA, preprocess_mean, centralize, extract_kv, fit, indim, outdim, transform, mean, ConvergenceException
 
 
 
 export fit, Tanh, Gaus, ica!, ICA, FastICA, indim, outdim, transform, mean
+export ICAInfo, mixingmatrix, unmixingmatrix, reconstruct
+
+"""
+    ICAInfo
+
+FastICA diagnostics: `converged`, `iterations`, and `residual` (the maximum
+absolute deviation of successive component inner-product magnitudes from unity).
+`numerical_rank` is the covariance rank used for whitening, or `nothing` when
+whitening is disabled or `ica!` is called directly.
+"""
+struct ICAInfo{T<:Real}
+    converged::Bool
+    iterations::Int
+    residual::T
+    numerical_rank::Union{Nothing,Int}
+end
+
+"""
+    unmixingmatrix(model::ICA)
+
+Return the matrix mapping centered measurements to source components:
+`unmixingmatrix(model) * (X .- mean(model))`.
+"""
+unmixingmatrix(model::ICA) = copy(transpose(model.W))
+
+"""
+    mixingmatrix(model::ICA)
+
+Return the Moore–Penrose pseudoinverse of `unmixingmatrix(model)`, mapping source
+components to centered measurements. For a reduced component count this gives
+the minimum-norm reconstruction in the retained measurement subspace.
+"""
+mixingmatrix(model::ICA) = pinv(unmixingmatrix(model))
+
+"""
+    reconstruct(model::ICA, sources; components=:, add_mean=true)
+
+Reconstruct measurements from a source vector or matrix, with one row per model
+component, as returned by `transform(model, X)`. `components` selects a component
+index or collection of distinct indices; unselected components contribute zero.
+The model mean is added once when `add_mean=true`. An empty selection returns
+the mean, or zeros when `add_mean=false`. Source scale and ordering follow the
+fitted model and are not identifiable as physical source amplitudes or labels.
+"""
+function reconstruct(model::ICA, sources::AbstractVecOrMat{<:Real};
+                     components=:, add_mean::Bool=true)
+    k = size(model.W, 2)
+    size(sources, 1) == k || throw(DimensionMismatch("Sources must have one row per model component."))
+    inds = components isa Colon ? collect(1:k) :
+           components isa Integer ? [components] : collect(components)
+    all(i -> i isa Integer && 1 <= i <= k, inds) || throw(ArgumentError("Component indices must be integers between 1 and $k."))
+    length(unique(inds)) == length(inds) || throw(ArgumentError("Component indices must be distinct."))
+    inds = Int[inds...]
+    A = mixingmatrix(model)
+    selected = sources isa AbstractVector ? sources[inds] : sources[inds, :]
+    X = A[:, inds] * selected
+    add_mean && (X .+= mean(model))
+    return X
+end
 
 
 # Independent Component Analysis
@@ -89,18 +149,33 @@ end
 #   Independent Component Analysis: Algorithms and Applications.
 #   Neural Network 13(4-5), 2000.
 #
+"""
+    ica!(FastICA(), W, X, fun, maxiter, tol; return_info=false,
+         on_nonconvergence=:log)
+
+Update the component matrix `W` using whitened observations `X`. Return `W`,
+or `(W, info::ICAInfo)` when `return_info=true`. Nonconvergence handling is
+`:log` (log an error and return the final iterate), `:throw` (throw
+`ConvergenceException`), or `:ignore` (return the final iterate without logging).
+"""
 function ica!(::FastICA, W::AbstractMatrix{T},      # initialized component matrix, size (m, k)
                   X::AbstractMatrix{T},      # (whitened) observation sample matrix, size(m, n)
                   fun::ICAGDeriv,         # approximate neg-entropy functor
                   maxiter::Int,           # maximum number of iterations
-                  tol::Real) where T      # convergence tolerance
+                  tol::Real; return_info::Bool=false,
+                  on_nonconvergence::Symbol=:log) where T
 
     # argument checking
     m = size(W, 1)
     k = size(W, 2)
     size(X, 1) == m || throw(DimensionMismatch("Sizes of W and X mismatch."))
     n = size(X, 2)
-    k <= min(m, n) || throw(DimensionMismatch("k must not exceed min(m, n)."))
+    1 <= k <= min(m, n) || throw(DimensionMismatch("k must be between 1 and min(m, n)."))
+    maxiter > 0 || throw(ArgumentError("maxiter must be positive."))
+    tol > 0 || throw(ArgumentError("tol must be positive."))
+    on_nonconvergence in (:log, :throw, :ignore) || throw(ArgumentError("on_nonconvergence must be :log, :throw, or :ignore."))
+    all(isfinite, X) || throw(ArgumentError("Observations must be finite."))
+    all(isfinite, W) && rank(W) == k || throw(ArgumentError("The initial component matrix must be finite and have full column rank."))
 
     @debug "FastICA Algorithm" m=m n=n k=k
 
@@ -117,7 +192,7 @@ function ica!(::FastICA, W::AbstractMatrix{T},      # initialized component matr
     end
 
     # main loop
-    chg = T(NaN)
+    chg = real(T)(NaN)
     t = 0
     converged = false
     @inbounds while !converged && t < maxiter
@@ -150,12 +225,34 @@ function ica!(::FastICA, W::AbstractMatrix{T},      # initialized component matr
 
         @debug "Iteration $t" change=chg tolerance=tol
     end
-    converged || @error("Did not converge", maxiter, chg, oftype(chg, tol))
-    return W
+    if !converged
+        if on_nonconvergence == :throw
+            throw(ConvergenceException(maxiter, chg, oftype(chg, tol)))
+        elseif on_nonconvergence == :log
+            @error("Did not converge", maxiter, chg, oftype(chg, tol))
+        end
+    end
+    info = ICAInfo(converged, t, chg, nothing)
+    return return_info ? (W, info) : W
 end
 
 #### interface function
 
+"""
+    fit(ICA, X, k; alg=FastICA(), rng=Random.default_rng(), return_info=false,
+        rank_rtol=sqrt(eps(eltype(X))), rank_atol=0, kwargs...)
+
+Fit `k` independent components to measurements in the rows of `X`. Random
+initialization uses `rng`; a supplied `winit` bypasses random initialization.
+Return an `ICA` model, or `(model, info::ICAInfo)` when `return_info=true`.
+`on_nonconvergence` accepts the policies documented for `ica!`.
+
+With `do_whiten=true`, retain covariance eigenvalues greater than
+`max(rank_atol, rank_rtol * largest_eigenvalue)`. Requesting more components
+than this numerical rank throws `ArgumentError`. Both thresholds must be finite
+and nonnegative. With `do_whiten=false`, data must already be whitened and
+`info.numerical_rank` is `nothing`.
+"""
 function MultivariateStats.fit(::Type{ICA}, X::AbstractMatrix{T}, k::Int;
                               alg::AbstractICAAlg = FastICA(), kwargs...) where T<:AbstractFloat
     fit(ICA, X, k, alg; kwargs...)
@@ -169,23 +266,36 @@ function MultivariateStats.fit(::Type{ICA}, X::AbstractMatrix{T},        # sampl
                           maxiter::Integer = 100,                        # maximum number of iterations
                           tol::Real = 1.0e-6,                            # convergence tolerance
                           mean = nothing,                                # pre-computed mean
-                          winit = nothing) where T<:Real # init guess of W, size (m, k)
+                          winit = nothing,
+                          rng::AbstractRNG = Random.default_rng(),
+                          return_info::Bool = false,
+                          on_nonconvergence::Symbol = :log,
+                          rank_rtol::Real = sqrt(eps(float(T))),
+                          rank_atol::Real = zero(float(T))) where T<:Real
 
     # check input arguments
     m, n = size(X)
     n > 1          || error("There must be more than one samples, i.e. n > 1.")
     1 <= k <= min(m, n) || throw(ArgumentError("k must be between 1 and min(m, n)."))
-    maxiter > 1    || error("maxiter must be greater than 1.")
+    maxiter > 0    || throw(ArgumentError("maxiter must be positive."))
     tol > 0        || error("tol must be positive.")
+    isfinite(rank_rtol) && rank_rtol >= 0 || throw(ArgumentError("rank_rtol must be finite and nonnegative."))
+    isfinite(rank_atol) && rank_atol >= 0 || throw(ArgumentError("rank_atol must be finite and nonnegative."))
+    all(isfinite, X) || throw(ArgumentError("Observations must be finite."))
 
     # preprocess data
     mv = preprocess_mean(X, mean)
     Z::Matrix{T} = centralize(X, mv)
+    all(isfinite, Z) || throw(ArgumentError("Centered observations must be finite."))
 
     W0 = zeros(T, 0, 0)  # whitening matrix
+    numerical_rank = nothing
     if do_whiten
-        C = rmul!(Z * transpose(Z), 1.0 / (n - 1))
-        Efac = eigen(C)
+        C = rmul!(Z * transpose(Z), one(T) / (n - 1))
+        Efac = eigen(Symmetric(C))
+        threshold = max(rank_atol, rank_rtol * maximum(Efac.values))
+        numerical_rank = count(>(threshold), Efac.values)
+        k <= numerical_rank || throw(ArgumentError("Requested $k components, but the covariance numerical rank is $numerical_rank at eigenvalue threshold $threshold. Reduce k or adjust rank_rtol/rank_atol."))
         ord = sortperm(Efac.values; rev=true)
         (v, P) = extract_kv(Efac, ord, k)
         W0 = rmul!(P, Diagonal(1 ./ sqrt.(v)))
@@ -193,17 +303,21 @@ function MultivariateStats.fit(::Type{ICA}, X::AbstractMatrix{T},        # sampl
     end
 
     # initialize
-    W = winit === nothing ? randn(T, size(Z,1), k) : copy(winit)
+    W = winit === nothing ? randn(rng, T, size(Z,1), k) : Matrix{T}(winit)
     size(W) == (size(Z, 1), k) || throw(DimensionMismatch("The initial component matrix must have size ($(size(Z, 1)), $k)."))
 
     # invoke core algorithm
-    ica!(alg, W, Z, fun, maxiter, tol)
+    _, iteration_info = ica!(alg, W, Z, fun, Int(maxiter), tol;
+        return_info=true, on_nonconvergence=on_nonconvergence)
 
     # construct model
     if do_whiten
         W = W0 * W
     end
-    return ICA(mv, W)
+    model = ICA(mv, W)
+    info = ICAInfo(iteration_info.converged, iteration_info.iterations,
+        iteration_info.residual, numerical_rank)
+    return return_info ? (model, info) : model
 end
 
 
