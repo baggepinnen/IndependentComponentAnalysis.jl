@@ -1,4 +1,4 @@
-using DSP, ImageFiltering, Images, SparseArrays, FFTW, RecipesBase
+using DSP, ImageFiltering, SparseArrays, FFTW, RecipesBase
 
 import DSP.Periodograms: compute_window
 

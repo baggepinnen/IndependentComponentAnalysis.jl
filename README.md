@@ -14,7 +14,7 @@ This package also modifies the interface to the algorithm slightly, use it like 
 using IndependentComponentAnalysis
 X = randn(4,100)
 k = 2 # Number of components to extract
-ica = fit(ICA, X, k,  alg = FastICA();
+ica = fit(ICA, X, k; alg = FastICA(),
                 fun       = Tanh(),
                 do_whiten = true,
                 maxiter   = 100,

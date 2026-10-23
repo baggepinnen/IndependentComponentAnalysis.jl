@@ -24,7 +24,6 @@ using DSP
 end
 
 
-using Plots
 ##
 t      = 0:0.1:2000
 # f    = LinRange(0.9, 1.2, length(t))
@@ -49,6 +48,7 @@ est, H = duet(
     onesided    = true,
 )
 if isinteractive()
+    @eval using Plots
     plotinds = 10000:10200
     plot(plotinds, est[plotinds,:], lab = "Estimated components", c = :blue)
     plot!(plotinds, [x1 x2][plotinds,:], lab = "True signal", c = :black)
@@ -58,7 +58,9 @@ end
 @test any(<(0), H.av)
 # @test any(>(0), H.dv)
 
-plot(H)
+if isinteractive()
+    plot(H)
+end
 ##
 
 # plot(plot.(welch_pgram.([x1,x2], 1024, fs=100))..., xscale=:log10)

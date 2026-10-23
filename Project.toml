@@ -7,7 +7,6 @@ version = "0.1.6"
 DSP = "717857b8-e6f2-59f4-9121-6e50c889abd2"
 FFTW = "7a1cc6ca-52ef-59f5-83cd-3a7055c09341"
 ImageFiltering = "6a3955dd-da59-5b1f-98d4-e7296123deb5"
-Images = "916415d5-f1e6-5110-898d-aaa5f9f070e0"
 LinearAlgebra = "37e2e46d-f89d-539d-b4ee-838fcccc9c8e"
 LoopVectorization = "bdcacae8-1622-11e9-2a5c-532679323890"
 MultivariateStats = "6f286f6a-111f-5878-ab1e-185364afe411"
@@ -16,24 +15,20 @@ RecipesBase = "3cdcf5f2-1ef4-517c-9805-6587b60abb01"
 SLEEFPirates = "476501e8-09a2-5ece-8869-fb82de89a1fa"
 SparseArrays = "2f01184e-e22b-5df5-ae63-d93ebab69eaf"
 Statistics = "10745b16-79ce-11e8-11f9-7d13ad32a3b2"
-StatsBase = "2913bbd2-ae8a-5f71-8c99-4fb6c76f3a91"
 
 [compat]
 DSP = "0.6, 0.7, 0.8"
 FFTW = "1.2"
-ImageFiltering = "0.6, 0.7"
-Images = "0.22, 0.23, 0.24, 0.25, 0.26"
+ImageFiltering = "0.7"
 LoopVectorization = "0.12"
 MultivariateStats = "0.7, 0.8, 0.9, 0.10"
 RecipesBase = "1"
 SLEEFPirates = "0.6"
 Statistics = "1"
-StatsBase = "0.32, 0.33"
-julia = "1"
+julia = "1.6"
 
 [extras]
-Plots = "91a5bcdd-55d7-5caf-9e0b-520d859cae80"
 Test = "8dfed614-e22c-5e08-85e1-65c5234f0b40"
 
 [targets]
-test = ["Test", "Plots"]
+test = ["Test"]

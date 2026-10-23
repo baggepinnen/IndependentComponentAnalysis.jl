@@ -1,6 +1,6 @@
 module IndependentComponentAnalysis
 
-using Statistics, LinearAlgebra
+using Statistics, LinearAlgebra, Random
 
 using LoopVectorization
 using SLEEFPirates
@@ -35,9 +35,9 @@ evaluate(f::Tanh{T}, x::T) where T<:Real = (a = f.a; t = tanh(a * x); (t, a * (1
 
 function update_UE!(f::Tanh, U::AbstractMatrix{T}, E1::AbstractVector{T}) where T
     n,k = size(U)
-    _s = zero(T)
     a = T(f.a)
     @inbounds for j = 1:k
+        _s = zero(T)
         @simd for i = 1:n
             t = SLEEFPirates.tanh_fast(a * U[i,j])
             U[i,j] = t
@@ -49,9 +49,9 @@ end
 
 function update_UE!(f::Tanh{T}, U::AbstractMatrix{CT}, E1::AbstractVector) where {T, CT <: Complex}
     n,k = size(U)
-    _s = zero(T)
     a = f.a
     @inbounds for j = 1:k
+        _s = zero(T)
         for i = 1:n
             t = complex(SLEEFPirates.tanh_fast(a * real(U[i,j])), SLEEFPirates.tanh_fast(a * imag(U[i,j])))
             U[i,j] = t
@@ -67,8 +67,8 @@ evaluate(f::Gaus, x::T) where T<:Real = (x2 = x * x; e = exp(-x2/2); (x * e, (1 
 
 function update_UE!(f::Gaus, U::AbstractMatrix{T}, E1::AbstractVector{T}) where T
     n,k = size(U)
-    _s = zero(T)
     @inbounds for j = 1:k
+        _s = zero(T)
         @avx for i = 1:n
             u = U[i,j]
             u2 = abs2(u)
@@ -145,7 +145,7 @@ function ica!(::FastICA, W::AbstractMatrix{T},      # initialized component matr
         copyto!(W, W * _invsqrtm!(W'W))
 
         # compare with Wp to evaluate a conversion change
-        chg = maximum(abs.(abs.(diag(W*Wp')) .- one(T)))
+        chg = maximum(abs.(abs.(diag(W'Wp)) .- one(T)))
         converged = (chg < tol)
 
         @debug "Iteration $t" change=chg tolerance=tol
@@ -156,9 +156,14 @@ end
 
 #### interface function
 
+function MultivariateStats.fit(::Type{ICA}, X::AbstractMatrix{T}, k::Int;
+                              alg::AbstractICAAlg = FastICA(), kwargs...) where T<:AbstractFloat
+    fit(ICA, X, k, alg; kwargs...)
+end
+
 function MultivariateStats.fit(::Type{ICA}, X::AbstractMatrix{T},        # sample matrix, size (m, n)
                           k::Int,                                        # number of independent components
-                          alg::AbstractICAAlg = FastICA();               # choice of algorithm
+                          alg::AbstractICAAlg;               # choice of algorithm
                           fun::ICAGDeriv = Tanh(one(T)),                 # approx neg-entropy functor
                           do_whiten::Bool = true,                        # whether to perform pre-whitening
                           maxiter::Integer = 100,                        # maximum number of iterations
