@@ -174,7 +174,7 @@ function MultivariateStats.fit(::Type{ICA}, X::AbstractMatrix{T},        # sampl
     # check input arguments
     m, n = size(X)
     n > 1          || error("There must be more than one samples, i.e. n > 1.")
-    k <= min(m, n) || error("k must not exceed min(m, n).")
+    1 <= k <= min(m, n) || throw(ArgumentError("k must be between 1 and min(m, n)."))
     maxiter > 1    || error("maxiter must be greater than 1.")
     tol > 0        || error("tol must be positive.")
 
@@ -194,6 +194,7 @@ function MultivariateStats.fit(::Type{ICA}, X::AbstractMatrix{T},        # sampl
 
     # initialize
     W = winit === nothing ? randn(T, size(Z,1), k) : copy(winit)
+    size(W) == (size(Z, 1), k) || throw(DimensionMismatch("The initial component matrix must have size ($(size(Z, 1)), $k)."))
 
     # invoke core algorithm
     ica!(alg, W, Z, fun, maxiter, tol)

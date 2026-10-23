@@ -23,6 +23,18 @@ using DSP
 
 end
 
+@testset "istft input validation" begin
+    S = zeros(ComplexF64, 65, 3)
+    @test_throws ArgumentError istft(S, 0; nfft=128)
+    @test_throws ArgumentError istft(S, 128, -1)
+    @test_throws ArgumentError istft(S, 128, 128)
+    @test_throws ArgumentError istft(S, 128; nfft=64)
+    @test_throws DimensionMismatch istft(S, 128; nfft=256)
+    @test_throws DimensionMismatch istft(S, 128; onesided=false)
+    @test_throws ArgumentError istft(S[:, 1:0], 128)
+end
+
+
 
 ##
 t      = 0:0.1:2000

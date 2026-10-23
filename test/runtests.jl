@@ -119,8 +119,22 @@ import Random
                         1 -1 1 -1 1 -1 1 -1]
             for f in (Tanh(1.0), Gaus())
                 W = Float64[1 0; 0 1; 0 0]
-                @test_logs min_level=Base.CoreLogging.Warn ica!(FastICA(), W, X, f, 2, 1e-8)
+                @test_logs ica!(FastICA(), W, X, f, 2, 1e-8)
                 @test W ≈ Float64[1 0; 0 1; 0 0]
+            end
+        end
+
+        @testset "ICA input validation" begin
+            X = randn(Random.MersenneTwister(2), 3, 100)
+            @test_throws ArgumentError fit(ICA, X, 0)
+            @test_throws ArgumentError fit(ICA, X, -1)
+            @test_throws ArgumentError fit(ICA, X, 4)
+            for do_whiten in (true, false)
+                rows = do_whiten ? 2 : size(X, 1)
+                @test_throws DimensionMismatch fit(ICA, X, 2;
+                    do_whiten=do_whiten, winit=ones(rows, 1), tol=Inf)
+                @test_throws DimensionMismatch fit(ICA, X, 2;
+                    do_whiten=do_whiten, winit=ones(rows + 1, 2), tol=Inf)
             end
         end
 
@@ -129,7 +143,7 @@ import Random
             S = randn(rng, 3, 5000).^3
             X = [1.0 0.3 -0.2; 0.5 1.0 0.4; -0.1 0.2 1.0] * S
             for f in (Tanh(1.0), Gaus())
-                M = @test_logs min_level=Base.CoreLogging.Warn fit(ICA, X, 3;
+                M = @test_logs fit(ICA, X, 3;
                     alg=FastICA(), fun=f, winit=Matrix{Float64}(I, 3, 3), maxiter=500)
                 recovered = transform(M, X)
                 correlations = abs.(cor(S, recovered, dims=2))
